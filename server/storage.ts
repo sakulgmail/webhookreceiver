@@ -1,4 +1,6 @@
-import { type Alert, type InsertAlert, type WebhookLog, type InsertWebhookLog, type WebhookConfig, type InsertWebhookConfig } from "@shared/schema";
+import { alerts, webhookLogs, webhookConfig, type Alert, type InsertAlert, type WebhookLog, type InsertWebhookLog, type WebhookConfig, type InsertWebhookConfig } from "@shared/schema";
+import { db } from "./db";
+import { eq, desc, count, and, gte } from "drizzle-orm";
 import { randomUUID } from "crypto";
 
 export interface IStorage {
@@ -28,105 +30,132 @@ export interface IStorage {
   }>;
 }
 
-export class MemStorage implements IStorage {
-  private alerts: Map<string, Alert>;
-  private webhookLogs: Map<string, WebhookLog>;
-  private webhookConfig: WebhookConfig | undefined;
+export class DatabaseStorage implements IStorage {
   private webhookCount: number = 0;
 
   constructor() {
-    this.alerts = new Map();
-    this.webhookLogs = new Map();
     this.webhookCount = 0;
-    
-    // Initialize default config
-    this.webhookConfig = {
-      id: randomUUID(),
-      port: 5000,
-      validateSignature: true,
-      isActive: true,
-    };
+    this.initializeDefaultConfig();
+  }
+
+  private async initializeDefaultConfig() {
+    const existing = await db.select().from(webhookConfig).limit(1);
+    if (existing.length === 0) {
+      await db.insert(webhookConfig).values({
+        port: 5000,
+        validateSignature: true,
+        sharedSecret: '',
+        isActive: true,
+      });
+    }
   }
 
   async getAlerts(limit: number = 50): Promise<Alert[]> {
-    const alerts = Array.from(this.alerts.values())
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-      .slice(0, limit);
-    return alerts;
+    return await db
+      .select()
+      .from(alerts)
+      .orderBy(desc(alerts.timestamp))
+      .limit(limit);
   }
 
   async getActiveAlerts(): Promise<Alert[]> {
-    return Array.from(this.alerts.values()).filter(alert => alert.status === 'active');
+    return await db
+      .select()
+      .from(alerts)
+      .where(eq(alerts.status, 'active'));
   }
 
   async getAlertsByType(type: string): Promise<Alert[]> {
-    return Array.from(this.alerts.values()).filter(alert => alert.type === type);
+    return await db
+      .select()
+      .from(alerts)
+      .where(eq(alerts.type, type));
   }
 
   async getAlertsInTimeRange(hours: number): Promise<Alert[]> {
     const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000);
-    return Array.from(this.alerts.values()).filter(alert => 
-      new Date(alert.timestamp) > cutoff
-    );
+    return await db
+      .select()
+      .from(alerts)
+      .where(gte(alerts.timestamp, cutoff));
   }
 
   async createAlert(insertAlert: InsertAlert): Promise<Alert> {
-    const id = randomUUID();
-    const alert: Alert = {
-      ...insertAlert,
-      id,
-      timestamp: new Date(),
-    };
-    this.alerts.set(id, alert);
-    return alert;
+    const [newAlert] = await db
+      .insert(alerts)
+      .values({
+        ...insertAlert,
+        status: insertAlert.status || 'active',
+        rawPayload: insertAlert.rawPayload || null,
+      })
+      .returning();
+    return newAlert;
   }
 
   async updateAlertStatus(id: string, status: string): Promise<Alert | undefined> {
-    const alert = this.alerts.get(id);
-    if (alert) {
-      alert.status = status;
-      this.alerts.set(id, alert);
-      return alert;
-    }
-    return undefined;
+    const [updatedAlert] = await db
+      .update(alerts)
+      .set({ status })
+      .where(eq(alerts.id, id))
+      .returning();
+    return updatedAlert || undefined;
   }
 
   async getWebhookLogs(limit: number = 100): Promise<WebhookLog[]> {
-    const logs = Array.from(this.webhookLogs.values())
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-      .slice(0, limit);
-    return logs;
+    return await db
+      .select()
+      .from(webhookLogs)
+      .orderBy(desc(webhookLogs.timestamp))
+      .limit(limit);
   }
 
   async createWebhookLog(insertLog: InsertWebhookLog): Promise<WebhookLog> {
-    const id = randomUUID();
-    const log: WebhookLog = {
-      ...insertLog,
-      id,
-      timestamp: new Date(),
-    };
-    this.webhookLogs.set(id, log);
-    return log;
+    const [newLog] = await db
+      .insert(webhookLogs)
+      .values({
+        ...insertLog,
+        details: insertLog.details || null,
+      })
+      .returning();
+    return newLog;
   }
 
   async clearWebhookLogs(): Promise<void> {
-    this.webhookLogs.clear();
+    await db.delete(webhookLogs);
   }
 
   async getWebhookConfig(): Promise<WebhookConfig | undefined> {
-    return this.webhookConfig;
+    const configs = await db.select().from(webhookConfig).limit(1);
+    return configs[0] || undefined;
   }
 
   async updateWebhookConfig(config: InsertWebhookConfig): Promise<WebhookConfig> {
-    if (this.webhookConfig) {
-      this.webhookConfig = { ...this.webhookConfig, ...config };
+    const existing = await this.getWebhookConfig();
+    
+    if (existing) {
+      const [updatedConfig] = await db
+        .update(webhookConfig)
+        .set({
+          port: config.port ?? existing.port,
+          validateSignature: config.validateSignature ?? existing.validateSignature,
+          sharedSecret: config.sharedSecret ?? existing.sharedSecret,
+          isActive: config.isActive ?? existing.isActive,
+        })
+        .where(eq(webhookConfig.id, existing.id))
+        .returning();
+      return updatedConfig;
     } else {
-      this.webhookConfig = {
-        id: randomUUID(),
-        ...config,
-      };
+      const [newConfig] = await db
+        .insert(webhookConfig)
+        .values({
+          port: config.port ?? 5000,
+          validateSignature: config.validateSignature ?? true,
+          sharedSecret: config.sharedSecret ?? '',
+          isActive: config.isActive ?? true,
+        })
+        .returning();
+      return newConfig;
     }
-    return this.webhookConfig;
   }
 
   async getAlertMetrics(): Promise<{
@@ -135,14 +164,26 @@ export class MemStorage implements IStorage {
     resolvedAlerts: number;
     webhooksReceived: number;
   }> {
-    const activeAlerts = await this.getActiveAlerts();
-    const dailyAlerts = await this.getAlertsInTimeRange(24);
-    const resolvedAlerts = Array.from(this.alerts.values()).filter(alert => alert.status === 'resolved');
+    const [activeResult] = await db
+      .select({ count: count() })
+      .from(alerts)
+      .where(eq(alerts.status, 'active'));
+    
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const [dailyResult] = await db
+      .select({ count: count() })
+      .from(alerts)
+      .where(gte(alerts.timestamp, cutoff));
+    
+    const [resolvedResult] = await db
+      .select({ count: count() })
+      .from(alerts)
+      .where(eq(alerts.status, 'resolved'));
     
     return {
-      activeAlerts: activeAlerts.length,
-      dailyAlerts: dailyAlerts.length,
-      resolvedAlerts: resolvedAlerts.length,
+      activeAlerts: activeResult.count,
+      dailyAlerts: dailyResult.count,
+      resolvedAlerts: resolvedResult.count,
       webhooksReceived: this.webhookCount,
     };
   }
@@ -152,4 +193,4 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
