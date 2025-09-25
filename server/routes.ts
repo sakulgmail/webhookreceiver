@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertAlertSchema, insertWebhookLogSchema, insertWebhookConfigSchema } from "@shared/schema";
 import { z } from "zod";
+import { createHmac, timingSafeEqual } from "crypto";
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Webhook endpoint for Meraki alerts
@@ -15,6 +16,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: `Webhook received from ${req.ip}`,
         details: { headers: req.headers, body: req.body }
       });
+
+      // Get webhook configuration for validation
+      const config = await storage.getWebhookConfig();
+      
+      // Validate webhook signature if enabled
+      if (config?.validateSignature && config?.sharedSecret) {
+        const signature = req.headers['x-meraki-signature'] || req.headers['x-cisco-meraki-signature'] || req.headers['x-hub-signature-256'];
+        
+        if (!signature) {
+          await storage.createWebhookLog({
+            level: "warn",
+            message: "Webhook signature validation enabled but no signature header found",
+            details: { headers: req.headers }
+          });
+          return res.status(401).json({ error: "Signature required but not provided" });
+        }
+
+        // Validate the signature
+        const body = JSON.stringify(req.body);
+        const expectedSignature = createHmac('sha256', config.sharedSecret)
+          .update(body)
+          .digest('hex');
+        
+        // Handle different signature formats
+        const providedSignature = typeof signature === 'string' 
+          ? signature.replace(/^(sha256=|sha256:)/, '')
+          : '';
+        
+        const expectedBuffer = Buffer.from(expectedSignature, 'hex');
+        const providedBuffer = Buffer.from(providedSignature, 'hex');
+        
+        if (expectedBuffer.length !== providedBuffer.length || !timingSafeEqual(expectedBuffer, providedBuffer)) {
+          await storage.createWebhookLog({
+            level: "error",
+            message: "Webhook signature validation failed",
+            details: { 
+              providedSignature: providedSignature,
+              expectedSignature: expectedSignature
+            }
+          });
+          return res.status(401).json({ error: "Invalid signature" });
+        }
+
+        await storage.createWebhookLog({
+          level: "info",
+          message: "Webhook signature validated successfully",
+          details: { signatureValid: true }
+        });
+      }
 
       // Validate and process Meraki webhook payload
       const payload = req.body;
