@@ -25,7 +25,7 @@ export const webhookLogs = pgTable("webhook_logs", {
 
 export const webhookConfig = pgTable("webhook_config", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  port: integer("port").notNull().default(3000),
+  port: integer("port").notNull().default(5010),
   validateSignature: boolean("validate_signature").notNull().default(true),
   sharedSecret: text("shared_secret").notNull().default(''),
   isActive: boolean("is_active").notNull().default(true),

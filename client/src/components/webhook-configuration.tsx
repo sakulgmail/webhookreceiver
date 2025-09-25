@@ -12,7 +12,7 @@ import { type WebhookConfig } from "@shared/schema";
 
 export default function WebhookConfiguration() {
   const { toast } = useToast();
-  const [port, setPort] = useState(5000);
+  const [port, setPort] = useState(5010);
   const [validateSignature, setValidateSignature] = useState(true);
   const [sharedSecret, setSharedSecret] = useState("");
   const [webhookUrl, setWebhookUrl] = useState("");
@@ -42,7 +42,7 @@ export default function WebhookConfiguration() {
 
   useEffect(() => {
     if (config) {
-      setPort(config.port || 5000);
+      setPort(config.port || 5010);
       setValidateSignature(config.validateSignature ?? true);
       setSharedSecret(config.sharedSecret || '');
     }
@@ -50,7 +50,7 @@ export default function WebhookConfiguration() {
     // Construct webhook URL based on current environment
     const protocol = window.location.protocol;
     const hostname = window.location.hostname;
-    const currentPort = config?.port || 5000;
+    const currentPort = config?.port || 5010;
     const url = `${protocol}//${hostname}:${currentPort}/api/webhook/meraki`;
     setWebhookUrl(url);
   }, [config]);
@@ -156,7 +156,7 @@ export default function WebhookConfiguration() {
               id="server-port"
               type="number"
               value={port}
-              onChange={(e) => setPort(parseInt(e.target.value) || 5000)}
+              onChange={(e) => setPort(parseInt(e.target.value) || 5010)}
               className="w-full"
               data-testid="input-server-port"
             />

@@ -42,7 +42,7 @@ export class DatabaseStorage implements IStorage {
     const existing = await db.select().from(webhookConfig).limit(1);
     if (existing.length === 0) {
       await db.insert(webhookConfig).values({
-        port: 5000,
+        port: 5010,
         validateSignature: true,
         sharedSecret: '',
         isActive: true,
@@ -148,7 +148,7 @@ export class DatabaseStorage implements IStorage {
       const [newConfig] = await db
         .insert(webhookConfig)
         .values({
-          port: config.port ?? 5000,
+          port: config.port ?? 5010,
           validateSignature: config.validateSignature ?? true,
           sharedSecret: config.sharedSecret ?? '',
           isActive: config.isActive ?? true,
