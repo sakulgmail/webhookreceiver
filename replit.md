@@ -29,7 +29,7 @@ Preferred communication style: Simple, everyday language.
 - **Three main entities**: alerts, webhook logs, and webhook configuration
 - **Zod schemas** for runtime validation and type safety
 - **Database migrations** managed through Drizzle Kit
-- **Neon Database** integration for serverless PostgreSQL
+- **Universal PostgreSQL driver** supports both Neon Database (Replit) and local PostgreSQL installations
 
 ## Authentication and Authorization
 - Currently uses basic session-based approach with `connect-pg-simple` for session storage
